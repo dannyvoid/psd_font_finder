@@ -29,9 +29,10 @@ python psd_font_finder.py --root-dir <directory_path> --output-file <output_file
 - `--root-dir`: Root directory containing PSD files to search (mandatory).
 - `--output-file`: File path to save found fonts (optional, default: `found_fonts.txt`).
 - `--recursive`: Perform a recursive search through subdirectories (optional).
+- `--allow-duplicates`: Allows the same font to be logged more than once (optional).
 
 ```
-python psd_font_finder.py --root-dir /path/to/psd_files --output-file output_fonts.txt --recursive
+python psd_font_finder.py --root-dir /path/to/psd_files --output-file output_fonts.txt --recursive --allow-duplicates
 ```
 
 ### Notes
