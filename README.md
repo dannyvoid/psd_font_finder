@@ -33,6 +33,7 @@ python psd_font_finder.py --root-dir <directory_path> --output-file <output_file
 ```
 python psd_font_finder.py --root-dir /path/to/psd_files --output-file output_fonts.txt
 ```
+
 ### Notes
 -   PSD files should have `.psd` or `.psb` extensions.
 -   Error messages may occur due to unsupported PSD features.
