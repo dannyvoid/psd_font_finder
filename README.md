@@ -31,7 +31,7 @@ python psd_font_finder.py --root-dir <directory_path> --output-file <output_file
 - `--recursive`: Perform a recursive search through subdirectories (optional).
 
 ```
-python psd_font_finder.py --root-dir /path/to/psd_files --output-file output_fonts.txt
+python psd_font_finder.py --root-dir /path/to/psd_files --output-file output_fonts.txt --recursive
 ```
 
 ### Notes
