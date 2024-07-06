@@ -21,7 +21,7 @@ def suppress_console_output():
         devnull.close()
 
 
-def write_font_to_file(font, output_file):
+def write_font_to_file(font, output_file, allow_duplicates=False):
     output_file = Path(output_file)
 
     if not output_file.exists():
@@ -33,12 +33,14 @@ def write_font_to_file(font, output_file):
 
     known_fonts = read_fonts_from_file(output_file)
 
-    if font not in known_fonts:
-        try:
-            with open(output_file, "a") as f:
-                f.write(f"{font}\n")
-        except IOError as e:
-            print(f"Error writing to file {output_file}: {e}")
+    if not allow_duplicates and font in known_fonts:
+        return
+
+    try:
+        with open(output_file, "a") as f:
+            f.write(f"{font}\n")
+    except IOError as e:
+        print(f"Error writing to file {output_file}: {e}")
 
 
 def read_fonts_from_file(output_file):
@@ -53,7 +55,7 @@ def read_fonts_from_file(output_file):
         return set()
 
 
-def find_fonts_in_psd(psd_path: Path, output_file):
+def find_fonts_in_psd(psd_path: Path, output_file, allow_duplicates=False):
     fonts_found = set()
 
     # We're suppressing the console output because of some ugly errors that get thrown
@@ -94,9 +96,9 @@ def find_fonts_in_psd(psd_path: Path, output_file):
                             found_font = str(found_font).strip("'")
                         except Exception:
                             pass
-                        fonts_found.add(found_font)
 
-                        write_font_to_file(found_font, output_file)
+                        fonts_found.add(found_font)
+                        write_font_to_file(found_font, output_file, allow_duplicates)
 
         except Exception as e:
             print(f"Error processing PSD {psd_path}: {e}")
@@ -120,7 +122,7 @@ def build_psd_paths(root_dir: Path, recursive: bool = False):
     return psd_paths
 
 
-def main(root_dir=None, output_file=None, recursive=False):
+def main(root_dir=None, output_file=None, recursive=False, allow_duplicates=False):
     if root_dir is None:
         root_dir = input("Enter root directory path: ").strip()
         while not os.path.isdir(root_dir):
@@ -135,7 +137,7 @@ def main(root_dir=None, output_file=None, recursive=False):
 
     for idx, psd_path in enumerate(psd_paths, start=1):
         print(f"Processing PSD {idx} of {len(psd_paths)}: {psd_path}")
-        fonts_found = find_fonts_in_psd(psd_path, output_file)
+        fonts_found = find_fonts_in_psd(psd_path, output_file, allow_duplicates)
         all_fonts.update(fonts_found)
 
     if not all_fonts:
@@ -168,10 +170,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Search subdirectories recursively",
     )
+    parser.add_argument(
+        "--allow-duplicates",
+        action="store_true",
+        help="Allow the same font to be saved multiple times",
+    )
 
     args = parser.parse_args()
 
     if args.root_dir:
-        main(args.root_dir, args.output_file, args.recursive)
+        main(args.root_dir, args.output_file, args.recursive, args.allow_duplicates)
     else:
         main()
