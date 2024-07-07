@@ -7,13 +7,14 @@ This script finds and logs fonts used in PSD files under a specified directory.
 
 - **Font Extraction**: Extracts font names from PSD files.
 - **Error Handling**: Handles errors related to file operations and PSD parsing.
-- **Output**: Saves found fonts into a specified output file (`found_fonts.txt` by default).
+- **Output**: Saves found fonts into a specified location (`psd_fonts.db` by default).
 - **Recursive Search**: Optionally performs a recursive search through subdirectories.
 
 ## Requirements
 
 - Python 3.x
 - `psd_tools` library (install via `pip install psd-tools`)
+- `sqlite3`
 
 ## Usage
 
@@ -29,10 +30,10 @@ python psd_font_finder.py --root-dir <directory_path> --output-file <output_file
 - `--root-dir`: Root directory containing PSD files to search (mandatory).
 - `--output-file`: File path to save found fonts (optional, default: `found_fonts.txt`).
 - `--recursive`: Perform a recursive search through subdirectories (optional).
-- `--allow-duplicates`: Allows the same font to be logged more than once (optional).
+- `--sort-paths`: Sorts Sort PSD paths before processing (optional, alphabetically).
 
 ```
-python psd_font_finder.py --root-dir /path/to/psd_files --output-file output_fonts.txt --recursive --allow-duplicates
+python psd_font_finder.py --root-dir /path/to/psd_files --output-file psd_fonts.db --recursive --sort-paths
 ```
 
 ### Notes
