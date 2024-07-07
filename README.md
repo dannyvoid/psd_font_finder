@@ -13,8 +13,8 @@ This script finds and logs fonts used in PSD files under a specified directory.
 ## Requirements
 
 - Python 3.x
+- sqlite3
 - `psd_tools` library (install via `pip install psd-tools`)
-- `sqlite3`
 
 ## Usage
 
