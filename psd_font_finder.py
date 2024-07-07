@@ -1,7 +1,9 @@
 import os
 import sys
+import sqlite3
 import argparse
 from pathlib import Path
+from datetime import datetime
 from psd_tools import PSDImage
 from contextlib import contextmanager
 
@@ -21,57 +23,118 @@ def suppress_console_output():
         devnull.close()
 
 
-def write_font_to_file(font, output_file, allow_duplicates=False):
-    output_file = Path(output_file)
-
-    if not output_file.exists():
-        try:
-            output_file.touch()
-        except IOError as e:
-            print(f"Error creating file {output_file}: {e}")
-            return
-
-    known_fonts = read_fonts_from_file(output_file)
-
-    if not allow_duplicates and font in known_fonts:
-        return
-
+@contextmanager
+def db_connection(db_path):
+    conn = sqlite3.connect(db_path)
     try:
-        with open(output_file, "a") as f:
-            f.write(f"{font}\n")
-    except IOError as e:
-        print(f"Error writing to file {output_file}: {e}")
+        yield conn
+    finally:
+        conn.close()
 
 
-def read_fonts_from_file(output_file):
+def create_tables(conn):
     try:
-        with open(output_file, "r") as f:
-            return set(f.read().splitlines())
-    except FileNotFoundError:
-        print(f"File {output_file} not found")
-        return set()
-    except IOError as e:
-        print(f"Error reading file {output_file}: {e}")
-        return set()
+        sql_create_psd_table = """CREATE TABLE IF NOT EXISTS psd_files (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    file_path TEXT UNIQUE,
+                                    creation_date TEXT,
+                                    modification_date TEXT
+                                  );"""
+        sql_create_fonts_table = """CREATE TABLE IF NOT EXISTS fonts (
+                                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                      font_name TEXT UNIQUE
+                                    );"""
+        sql_create_psd_fonts_table = """CREATE TABLE IF NOT EXISTS psd_fonts (
+                                          psd_id INTEGER,
+                                          font_id INTEGER,
+                                          FOREIGN KEY (psd_id) REFERENCES psd_files (id),
+                                          FOREIGN KEY (font_id) REFERENCES fonts (id),
+                                          PRIMARY KEY (psd_id, font_id)
+                                        );"""
+        cursor = conn.cursor()
+        cursor.execute(sql_create_psd_table)
+        cursor.execute(sql_create_fonts_table)
+        cursor.execute(sql_create_psd_fonts_table)
+        conn.commit()
+        print("Tables created successfully")
+    except sqlite3.Error as e:
+        print(f"Error creating tables: {e}")
 
 
-def find_fonts_in_psd(psd_path: Path, output_file, allow_duplicates=False):
+def get_file_dates(file_path):
+    file_stat = os.stat(file_path)
+    creation_date = datetime.fromtimestamp(file_stat.st_ctime).isoformat()
+    modification_date = datetime.fromtimestamp(file_stat.st_mtime).isoformat()
+    return creation_date, modification_date
+
+
+def insert_psd_file(conn, psd_path):
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM psd_files WHERE file_path = ?", (str(psd_path),))
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+        else:
+            creation_date, modification_date = get_file_dates(psd_path)
+            sql_insert_psd = """INSERT INTO psd_files (file_path, creation_date, modification_date)
+                                VALUES (?, ?, ?);"""
+            cursor.execute(
+                sql_insert_psd, (str(psd_path), creation_date, modification_date)
+            )
+            conn.commit()
+            return cursor.lastrowid
+    except sqlite3.Error as e:
+        print(f"Error inserting or retrieving PSD file {psd_path}: {e}")
+        return None
+
+
+def update_psd_file(conn, psd_id, psd_path):
+    _, modification_date = get_file_dates(psd_path)
+    try:
+        sql_update_psd = """UPDATE psd_files
+                            SET modification_date = ?
+                            WHERE id = ?;"""
+        cursor = conn.cursor()
+        cursor.execute(sql_update_psd, (modification_date, psd_id))
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"Error updating PSD file {psd_path}: {e}")
+
+
+def insert_font(conn, font_name):
+    try:
+        sql_insert_font = """INSERT OR IGNORE INTO fonts (font_name)
+                             VALUES (?);"""
+        cursor = conn.cursor()
+        cursor.execute(sql_insert_font, (font_name,))
+        conn.commit()
+        return cursor.lastrowid
+    except sqlite3.Error as e:
+        print(f"Error inserting font {font_name}: {e}")
+        return None
+
+
+def link_psd_font(conn, psd_id, font_id):
+    try:
+        sql_insert_psd_font = """INSERT OR IGNORE INTO psd_fonts (psd_id, font_id)
+                                 VALUES (?, ?);"""
+        cursor = conn.cursor()
+        cursor.execute(sql_insert_psd_font, (psd_id, font_id))
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"Error linking PSD {psd_id} with font {font_id}: {e}")
+
+
+def sanitize_fontname(fontname: str) -> str:
+    fontname = str(fontname)
+    fontname = fontname.strip("'")
+    fontname = fontname.strip('"')
+    return fontname
+
+
+def find_fonts_in_psd(conn, psd_id, psd_path):
     fonts_found = set()
-
-    # We're suppressing the console output because of some ugly errors that get thrown
-    #
-    # Example:
-    # Unknown image resource 1092
-    # Unknown key: b'CAI '
-    # Unknown tagged block: b'CAI ', b'\x00\x00\x00\x03\x00\x00\x00\x10\x00\x00\x00\x01\x00\x00\x00\x00 ... =77'
-    # Unknown key: b'OCIO'
-    # Unknown tagged block: b'OCIO', b'\x00\x00\x00\x10\x00\x00\x00\x01\x00\x00\x00\x00\x00\x1bdo ... =170'
-    # Unknown key: b'GenI'
-    # Unknown tagged block: b'GenI', b'\x00\x00\x00\x10\x00\x00\x00\x01\x00\x00\x00\x00\x00\x0bge ... =55'
-    #
-    # Cause:
-    # New resources introduced in the recent versions of Photoshop that have no known documentation
-    # https://github.com/psd-tools/psd-tools/issues/415#issuecomment-2172064533
 
     with suppress_console_output():
         try:
@@ -93,12 +156,15 @@ def find_fonts_in_psd(psd_path: Path, output_file, allow_duplicates=False):
                         found_font = font_name
 
                         try:
-                            found_font = str(found_font).strip("'")
+                            found_font = sanitize_fontname(found_font)
                         except Exception:
                             pass
 
-                        fonts_found.add(found_font)
-                        write_font_to_file(found_font, output_file, allow_duplicates)
+                        if found_font not in fonts_found:
+                            fonts_found.add(found_font)
+                            font_id = insert_font(conn, found_font)
+                            if font_id:
+                                link_psd_font(conn, psd_id, font_id)
 
         except Exception as e:
             print(f"Error processing PSD {psd_path}: {e}")
@@ -106,7 +172,9 @@ def find_fonts_in_psd(psd_path: Path, output_file, allow_duplicates=False):
     return fonts_found
 
 
-def build_psd_paths(root_dir: Path, recursive: bool = False):
+def build_psd_paths(
+    root_dir: Path, recursive: bool = False, sort_paths: bool = False
+) -> set:
     psd_extensions = {".psd", ".psb"}
     psd_paths = set()
 
@@ -119,36 +187,51 @@ def build_psd_paths(root_dir: Path, recursive: bool = False):
             if path.suffix.lower() in psd_extensions:
                 psd_paths.add(path.resolve())
 
+    if sort_paths:
+        psd_paths = sorted(psd_paths)
+
     return psd_paths
 
 
-def main(root_dir=None, output_file=None, recursive=False, allow_duplicates=False):
+def main(root_dir=None, db_path=None, recursive=False, sort_paths=False) -> None:
     if root_dir is None:
         root_dir = input("Enter root directory path: ").strip()
         while not os.path.isdir(root_dir):
             print("Invalid directory path. Please try again.")
             root_dir = input("Enter root directory path: ").strip()
 
-    if output_file is None:
-        output_file = "found_fonts.txt"
+    if db_path is None:
+        db_path = "psd_fonts.db"
 
-    psd_paths = build_psd_paths(Path(root_dir), recursive=recursive)
-    all_fonts = set()
+    with db_connection(db_path) as conn:
+        create_tables(conn)
+        psd_paths = build_psd_paths(
+            Path(root_dir), recursive=recursive, sort_paths=sort_paths
+        )
 
-    for idx, psd_path in enumerate(psd_paths, start=1):
-        print(f"Processing PSD {idx} of {len(psd_paths)}: {psd_path}")
-        fonts_found = find_fonts_in_psd(psd_path, output_file, allow_duplicates)
-        all_fonts.update(fonts_found)
+        for idx, psd_path in enumerate(psd_paths, start=1):
+            print(f"Processing PSD {idx} of {len(psd_paths)}: {psd_path}")
 
-    if not all_fonts:
-        print("\nNo fonts found.")
-        return
+            # Check if the PSD file already exists in the database
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM psd_files WHERE file_path = ?", (str(psd_path),)
+            )
+            row = cursor.fetchone()
 
-    all_fonts = sorted(all_fonts)
+            if row:
+                print(f"Skipping PSD {psd_path} as it's already processed.")
+                continue  # Skip further processing
 
-    print("\nFonts found:")
-    for font in all_fonts:
-        print(font)
+            psd_id = insert_psd_file(conn, psd_path)
+
+            if psd_id is not None:
+                update_psd_file(conn, psd_id, psd_path)
+                find_fonts_in_psd(conn, psd_id, psd_path)
+            else:
+                print(f"Error processing PSD: {psd_path}")
+
+    print("Processing complete.")
 
 
 if __name__ == "__main__":
@@ -161,9 +244,9 @@ if __name__ == "__main__":
         help="Root directory containing PSD files",
     )
     parser.add_argument(
-        "--output-file",
+        "--db-path",
         type=str,
-        help="File to save found fonts",
+        help="Path to the SQLite database file",
     )
     parser.add_argument(
         "--recursive",
@@ -171,14 +254,14 @@ if __name__ == "__main__":
         help="Search subdirectories recursively",
     )
     parser.add_argument(
-        "--allow-duplicates",
+        "--sort-paths",
         action="store_true",
-        help="Allow the same font to be saved multiple times",
+        help="Sort PSD paths before processing",
     )
 
     args = parser.parse_args()
 
     if args.root_dir:
-        main(args.root_dir, args.output_file, args.recursive, args.allow_duplicates)
+        main(args.root_dir, args.db_path, args.recursive, args.sort_paths)
     else:
         main()
